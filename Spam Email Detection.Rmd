@@ -1,0 +1,339 @@
+---
+title: "Sentiment Analysis and Classification Model for Email Spam Detection"
+author: "Stephen Fabeyo"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+---------
+
+This project centers on crafting a sentiment analysis and classification model tailored for email spam detection. Employing natural language processing techniques, the model discerns between legitimate (ham) and spam emails with high accuracy. By scrutinizing email content and sentiment, potential spam is effectively filtered, bolstering email security and user experience. The methodology involves feature engineering, encompassing text preprocessing, sentiment analysis, and machine learning algorithms like support vector machines or neural network.
+
+---------
+
+
+```{r, echo=FALSE, include=FALSE}
+
+library("tm")  # For text mining
+library("SnowballC")  # For text processing
+library("wordcloud")  # For creating word clouds
+library("RColorBrewer")  # For color palettes
+library("syuzhet")  # For sentiment analysis
+library("ggplot2")  # For plotting
+library(caret)  # For machine learning
+library(e1071)  # For SVM model, used by caret for classification
+library(kernlab) #for kernel-based machine learning methods in R
+
+```
+
+---------
+
+# Part 1 - Text Mining and Sentiment Analysis: Analysis with R
+
+---------
+
+Step 1: Reading file data into R
+
+---------
+
+
+```{r}
+
+data <- read.csv('spam.csv', stringsAsFactors = FALSE)
+
+```
+
+
+```{r}
+
+print(str(data))
+print(summary(data))
+
+```
+
+---------
+
+Step 2: Text Preprocessing.
+
+---------
+
+```{r, warning=FALSE}
+
+
+TextCorpus <- Corpus(VectorSource(data$Message))
+
+# Function to replace "/", "@" and "|" with space
+toSpace <- content_transformer(function (x, pattern) gsub(pattern, " ", x))
+
+# Apply the transformations
+TextCorpus <- tm_map(TextCorpus, toSpace, "/")
+TextCorpus <- tm_map(TextCorpus, toSpace, "@")
+TextCorpus <- tm_map(TextCorpus, toSpace, "\\|")
+TextCorpus <- tm_map(TextCorpus, content_transformer(tolower))
+TextCorpus <- tm_map(TextCorpus, removeNumbers)
+TextCorpus <- tm_map(TextCorpus, removeWords, stopwords("english"))
+TextCorpus <- tm_map(TextCorpus, removeWords, c("s", "company", "team"))
+TextCorpus <- tm_map(TextCorpus, removePunctuation)
+TextCorpus <- tm_map(TextCorpus, stripWhitespace)
+TextCorpus <- tm_map(TextCorpus, stemDocument)
+
+TextCorpus
+
+```
+
+---------
+
+Step 3:  Visualize Important Terms
+
+---------
+
+```{r, warning=FALSE}
+
+dtm <- TermDocumentMatrix(TextCorpus)
+dtm_matrix <- as.matrix(dtm)
+
+dtm_v <- sort(rowSums(dtm_matrix),decreasing=TRUE)
+
+dtm_d <- data.frame(word = names(dtm_v),freq=dtm_v)
+
+# Display the top 5 most frequent words
+
+head(dtm_d, 5)
+
+```
+
+---------
+
+Sentiment Scores in Email
+
+---------
+
+```{r}
+
+barplot(dtm_d[1:5,]$freq, las = 2, names.arg = dtm_d[1:5,]$word,
+        col ="lightgreen", main ="Sentiment Scores in Emails",
+        ylab = "Word frequencies")
+
+```
+
+---------
+
+The most frequent words
+
+---------
+
+```{r}
+
+set.seed(1234)
+wordcloud(words = dtm_d$word, freq = dtm_d$freq, min.freq = 5,
+          max.words=100, random.order=FALSE, rot.per=0.40, 
+          colors=brewer.pal(8, "Dark2"))
+```
+
+---------
+
+Step 3: Sentiment Analysis.
+
+---------
+
+```{r, warning=FALSE, include=FALSE}
+
+sentiment<- sapply(sapply(TextCorpus, as.character), get_nrc_sentiment)
+
+sentiment
+
+```
+
+
+---------
+
+Sentiment scores
+
+---------
+
+```{r, warning=FALSE}
+
+# Initialize a numeric vector to store sentiment scores
+sentiment_scores <- numeric(length(data$Message))
+
+# Loop through each message and calculate sentiment score
+for (i in 1:length(data$Message)) {
+  # Directly store the sentiment score; no need to access a 'valence' component
+  sentiment_scores[i] <- get_sentiment(data$Message[i], method = "nrc")
+}
+
+# Assign sentiment scores to the data frame
+data$Sentiment <- sentiment_scores
+
+data
+```
+
+---------
+
+Emotion Classification
+
+---------
+
+```{r}
+
+
+emotion<- get_nrc_sentiment(data$Message)
+
+# head(d,10) - to see top 10 lines of the get_nrc_sentiment dataframe
+
+head (emotion,5)
+
+```
+
+---------
+
+Survey Sentiments
+
+---------
+
+```{r}
+
+#transpose
+
+td<-data.frame(t(emotion))
+
+#The function rowSums computes column sums across rows for each level of a grouping variable.
+
+td_new <- data.frame(rowSums(td[2:253]))
+
+#Transformation and cleaning
+
+names(td_new)[1] <- "count"
+td_new <- cbind("sentiment" = rownames(td_new), td_new)
+rownames(td_new) <- NULL
+td_new2<-td_new[1:8,]
+
+#Plot One - count of words associated with each sentiment
+
+quickplot(sentiment, data=td_new2, weight=count, geom="bar", fill=sentiment, ylab="count")+ggtitle("Survey sentiments")
+
+
+```
+
+
+---------
+
+Bar Plot showing the count of words associated with each sentiment expressed as a percentage
+
+---------
+
+```{r}
+
+
+#Plot two - count of words associated with each sentiment, expressed as a percentage
+
+barplot(
+  sort(colSums(prop.table(emotion[, 1:8]))), 
+  horiz = TRUE, 
+  cex.names = 0.7, 
+  las = 1, 
+  main = "Emotions in Text", xlab="Percentage"
+)
+
+```
+
+
+---------
+
+# Part 2 - ML Spam Mail detection using SVM
+
+---------
+
+
+Step 1: Feature Extraction: Convert the corpus into a Document-Term Matrix (DTM) and bind the sentiment scores as additional features.
+
+---------
+
+
+```{r}
+
+
+dtm_2 <- DocumentTermMatrix(TextCorpus)
+dtm_2 <- removeSparseTerms(dtm_2, 0.99)
+
+# Prepare training data
+
+labels <- as.factor(data$Category) 
+features <- as.data.frame(as.matrix(dtm_2))
+colnames(features) <- make.names(colnames(features))
+features$spam <- labels
+
+
+```
+
+---------
+
+Step 2: Prepare Training and Test Sets: Split the data into training and test sets.
+
+---------
+
+```{r}
+
+# Train-Test Split
+
+set.seed(123)
+
+trainIndex <- createDataPartition(features$spam, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+trainData <- features[ trainIndex,]
+testData  <- features[-trainIndex,]
+
+```
+
+
+---------
+
+Step 3: Model Training: using Support Vector Machine (SVM).
+
+---------
+
+```{r}
+
+model <- train(spam ~ ., data = trainData, method = "svmLinear")
+
+model
+
+```
+
+---------
+
+Step 4:  Evaluate the Model.
+
+---------
+
+
+```{r}
+
+predictions <- predict(model, testData)
+
+head(predictions, 10)
+
+```
+
+---------
+
+Step 5:  Make predictions on the test set and evaluate the model.
+
+---------
+
+```{r}
+
+confusionMatrix(predictions, testData$spam)
+
+```
+
+The spam mail classification model was developed using Support Vector Machine (SVM) with a linear kernel and achieved an accuracy of 96.23% and a Kappa statistic of 0.8316. This was evidenced by a confusion matrix that recorded 950 accurate ham predictions and 122 accurate spam predictions, alongside 27 false spam and 15 false ham predictions. The model's high accuracy highlights the efficacy of SVM in text classification tasks, demonstrating the potential of machine learning techniques to accurately differentiate between spam and non-spam communications with a straightforward approach to pre-processing and feature extraction.
+
+
