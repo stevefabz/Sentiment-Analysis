@@ -29,6 +29,7 @@ library(ggplot2)  # For plotting
 library(caret)  # For machine learning
 library(e1071)  # For SVM model, used by caret for classification
 library(kernlab) # For kernel-based machine learning methods in R
+library(knitr) # for building a table
 
 ```
 
@@ -47,11 +48,13 @@ Step 1: Reading file data into R
 
 data <- read.csv('spam.csv', stringsAsFactors = FALSE)
 
+kable(head(data))
+
 ```
 
 --------
 
-Summary Statistics
+Data Summary
 
 -------
 
@@ -101,6 +104,7 @@ Step 3:  Visualize Important Terms
 ```{r, warning=FALSE}
 
 dtm <- TermDocumentMatrix(TextCorpus)
+
 dtm_matrix <- as.matrix(dtm)
 
 dtm_v <- sort(rowSums(dtm_matrix),decreasing=TRUE)
@@ -109,7 +113,7 @@ dtm_d <- data.frame(word = names(dtm_v),freq=dtm_v)
 
 # Display the top 5 most frequent words
 
-head(dtm_d, 10)
+kable(head(dtm_d, 10))
 
 ```
 
@@ -151,8 +155,6 @@ Step 3: Sentiment Analysis.
 
 sentiment<- sapply(sapply(TextCorpus, as.character), get_nrc_sentiment)
 
-sentiment
-
 ```
 
 
@@ -191,8 +193,6 @@ Assign sentiment scores to the data frame
 
 data$Sentiment <- sentiment_scores
 
-data
-
 ```
 
 
@@ -209,7 +209,7 @@ emotion<- get_nrc_sentiment(data$Message)
 
 # head(d,10) - to see top 10 lines of the get_nrc_sentiment dataframe
 
-head (emotion,5)
+kable(head(emotion,10))
 
 ```
 
